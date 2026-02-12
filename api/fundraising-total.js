@@ -12,10 +12,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Fetch the fundraising page
+    // Fetch the fundraising page with more realistic headers
     const response = await fetch('https://fundraisemyway.cancer.ca/campaigns/scoreforcancer', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
       }
     });
 
@@ -25,19 +29,44 @@ export default async function handler(req, res) {
 
     const html = await response.text();
     
-    // Extract the amount raised using regex
-    // Looking for pattern like "$186,578 RAISED"
-    const amountMatch = html.match(/\$[\d,]+\s+RAISED/i);
-    const goalMatch = html.match(/GOAL\s+\$[\d,]+/i);
+    // Try multiple patterns to find the amount
+    let amountRaised = null;
+    let goal = null;
     
-    if (!amountMatch) {
-      throw new Error('Could not find amount raised on page');
+    // Pattern 1: $186,578 RAISED
+    let match = html.match(/\$[\d,]+\s+RAISED/i);
+    if (match) {
+      amountRaised = match[0].replace(/\s+RAISED/i, '').trim();
+    }
+    
+    // Pattern 2: Try finding just currency amounts
+    if (!amountRaised) {
+      match = html.match(/\$[\d,]+\.?\d*/);
+      if (match) {
+        amountRaised = match[0];
+      }
+    }
+    
+    // Pattern 3: Look for JSON data in script tags
+    if (!amountRaised) {
+      const scriptMatch = html.match(/"amountRaised":\s*"?\$?([\d,]+)/i);
+      if (scriptMatch) {
+        amountRaised = '$' + scriptMatch[1];
+      }
+    }
+    
+    // Find goal
+    const goalMatch = html.match(/GOAL\s+\$[\d,]+/i);
+    if (goalMatch) {
+      goal = goalMatch[0].replace(/GOAL\s+/i, '').trim();
+    }
+    
+    if (!amountRaised) {
+      // Return diagnostic info to help debug
+      const preview = html.substring(0, 1000);
+      throw new Error(`Could not find amount raised. HTML preview: ${preview}`);
     }
 
-    // Extract just the dollar amount (remove "RAISED" text)
-    const amountRaised = amountMatch[0].replace(/\s+RAISED/i, '').trim();
-    const goal = goalMatch ? goalMatch[0].replace(/GOAL\s+/i, '').trim() : null;
-    
     // Extract numeric value for calculations
     const numericAmount = parseFloat(amountRaised.replace(/[$,]/g, ''));
     const numericGoal = goal ? parseFloat(goal.replace(/[$,]/g, '')) : null;
